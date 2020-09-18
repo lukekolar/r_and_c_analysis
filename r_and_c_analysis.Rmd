@@ -1,30 +1,81 @@
 ---
-title: "r_and_c_analysis"
+title: "\"Rocks & Cows\" Facebook Page Analysis"
 author: "Luke Kolar"
 date: "9/15/2020"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+library(Rfacebook)
+library(RCurl)
+
+fb_ouath <- fbOAuth(app_id = "644122299819933",
+                    app_secret = "46b30f3907abf6c46e64f432c62166ef",
+                    extended_permissions = TRUE)
 ```
 
-## R Markdown
+```{r}
+library(Rfacebook)
+library(tidyverse)
+library(forcats)
+library(lubridate)
+library(hrbrthemes)
+library(ggalt)
+library(ggbeeswarm)
+library(plotly)
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+token <- 'XXXXXXXXXXXXXXXXXXXXX'
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+group_id <- '910318129474346'
 
-```{r cars}
-summary(cars)
 ```
 
-## Including Plots
+```{r}
 
-You can also embed plots, for example:
+group_scrape <- function(token, group_id, limit) {
+  
+  #function we'll use to convert the date output from facebook to an R date
+  format.facebook.date <- function(datestring) {
+  date <- as.POSIXct(datestring, format = "%Y-%m-%dT%H:%M:%S+0000", tz = "GMT")
+  }
+  
+  # handy Rfacebook function that will return most of what we want in a tidy datatable
+  data_main <-  getGroup(group_id, token, feed = TRUE, n = limit)
+  
+  # custom API call to get the name of the link in any post that has one, returned as a list of lists
+  link_names <- callAPI(paste0("https://graph.facebook.com/v2.9/", group_id, 
+                                   "?fields=feed.limit(", limit, "){name}"), token)
+  # function to get the data out of the lists and into a tidy data frame of the same length as data_main
+  # posts with no link will be NAs
+  link_names <- bind_rows(lapply(link_names$feed$data, as.data.frame))
+  
+  # levels for our Days factor variable we're about to create
+  days <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+  
+  # merge the two datasets on the id post variable
+  final <- merge(data_main, link_names, by = "id")
+  
+  # remove posts that don't contain a link with complete.cases on the link name column
+  final <- final[complete.cases(final[,12]),] %>%
+    mutate(created_time = format.facebook.date(created_time),
+           Date = as.Date(created_time, format = "%d/%m/%y"),
+           Minute = make_datetime(2017, 01, 01, hour(created_time), minute(created_time), 0, tz = "GMT"),
+           Hour = make_datetime(2017, 01, 01, hour(created_time), 0, 0, tz = "GMT"),
+           Day = factor(weekdays(created_time), levels = days),
+           Month = make_date(year(created_time), month(created_time), 01),
+           Link = paste0("<a href='",link,"' target='_blank'>","open link...","</a>")) %>%
+    select(Date, Month, `Posted By` = from_name, Track = name, Day, Hour, Minute, Likes = likes_count,
+           Comments = comments_count, Link)
+  
+  # gets rid of any weird stuff (emojis etc) in the link names that can cause a data.table to fail
+  final$Track <- sapply(final$Track, function(row) iconv(row, "latin1", "ASCII", sub=""))
+  
+  return(final)
+}
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+tunes <- group_scrape(group_id = group_id, limit = 1500)
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
